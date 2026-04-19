@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/v1/cron/reminders",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/v1/cron/noshow",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

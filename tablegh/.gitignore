@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Environment files — never commit
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Next.js
+.next/
+out/
+
+# Prisma generated
+prisma/migrations/**/migration.sql
+# Keep migration folders but not auto-generated SQL in .gitignore
+# Actually track migrations for reproducibility — remove the above line in real projects
+
+# Testing
+coverage/
+playwright-report/
+test-results/
+
+# Build artifacts
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# Sentry
+.sentryclirc

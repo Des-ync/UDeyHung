@@ -1,0 +1,742 @@
+// TableGH — Prisma Schema
+// PostgreSQL 16 on Neon
+// All monetary values in pesewas (1 GHS = 100 pesewas)
+// Timezone: Africa/Accra (GMT+0, no DST)
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DATABASE_URL_UNPOOLED")
+  extensions = [pg_trgm, unaccent]
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserRole {
+  DINER
+  RESTAURANT_STAFF
+  RESTAURANT_OWNER
+  ADMIN
+}
+
+enum CuisineTag {
+  GHANAIAN
+  NIGERIAN
+  LEBANESE
+  CHINESE
+  INDIAN
+  ITALIAN
+  CONTINENTAL
+  SEAFOOD
+  VEGAN
+  MEDITERRANEAN
+  AMERICAN
+  BARBECUE
+  PIZZA
+  SUSHI
+}
+
+enum VenueCategory {
+  FINE_DINING
+  CASUAL
+  CHOP_BAR
+  ROOFTOP
+  CAFE
+  LOUNGE
+  BEACH_BAR
+  FAST_CASUAL
+  FOOD_COURT
+  BAR
+}
+
+enum PriceLevel {
+  BUDGET      // ₵
+  MODERATE    // ₵₵
+  UPSCALE     // ₵₵₵
+  FINE        // ₵₵₵₵
+}
+
+enum Neighborhood {
+  OSU
+  CANTONMENTS
+  AIRPORT_RESIDENTIAL
+  EAST_LEGON
+  LABONE
+  RIDGE
+  DZORWULU
+  SPINTEX
+  TEMA
+  ACHIMOTA
+  NORTH_LEGON
+  ADABRAKA
+  ASYLUM_DOWN
+  CIRCLE
+  DANSOMAN
+  HAATSO
+  KANESHIE
+  LAPAZ
+  MADINA
+  ROMAN_RIDGE
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum TableCapacity {
+  TWO    // 2-top
+  FOUR   // 4-top
+  SIX    // 6-top
+  EIGHT  // 8-top
+  LARGE  // 9+
+}
+
+enum ReservationStatus {
+  PENDING           // awaiting deposit or just created
+  CONFIRMED         // deposit paid or no deposit required
+  SEATED            // diner checked in
+  COMPLETED         // booking fulfilled
+  CANCELLED_DINER   // diner cancelled
+  CANCELLED_VENUE   // restaurant cancelled
+  NO_SHOW           // diner didn't appear
+}
+
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED      // sent WhatsApp with 15-min claim window
+  CLAIMED       // converted to reservation
+  EXPIRED       // 15-min window lapsed
+  CANCELLED
+}
+
+enum WalkInStatus {
+  QUEUED
+  NOTIFIED
+  SEATED
+  CANCELLED
+  NO_SHOW
+}
+
+enum OccasionType {
+  BIRTHDAY
+  ANNIVERSARY
+  BUSINESS
+  DATE_NIGHT
+  CASUAL
+  CELEBRATION
+  OTHER
+}
+
+enum DietaryTag {
+  VEGETARIAN    // V
+  VEGAN         // VG
+  GLUTEN_FREE   // GF
+  HALAL
+  CONTAINS_NUTS
+  DAIRY_FREE
+  SPICY_1
+  SPICY_2
+  SPICY_3
+}
+
+enum DishSpecialty {
+  JOLLOF
+  WAAKYE
+  BANKU
+  TILAPIA
+  KHEBAB
+  FUFU
+  KELEWELE
+  KONTOMIRE
+  EGUSI
+  PEANUT_SOUP
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentProvider {
+  PAYSTACK
+  HUBTEL
+}
+
+enum MoMoNetwork {
+  MTN         // 024, 054, 055, 059
+  VODAFONE    // 020, 050 (Telecel)
+  AIRTELTIGO  // 027, 057, 026, 056
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMATION
+  BOOKING_REMINDER_24H
+  BOOKING_REMINDER_2H
+  BOOKING_CANCELLED
+  BOOKING_MODIFIED
+  WAITLIST_AVAILABLE
+  WALKIN_READY
+  OTP
+  GENERAL
+}
+
+enum NotificationChannel {
+  WHATSAPP
+  SMS
+  EMAIL
+  PUSH
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum PhotoContext {
+  EXTERIOR
+  INTERIOR
+  DISH
+  MENU
+  AMBIANCE
+  REVIEW
+}
+
+// =============================================================================
+// MODELS
+// =============================================================================
+
+model User {
+  id               String    @id @default(cuid())
+  clerkId          String    @unique
+  phone            String    @unique // E.164 format: +233XXXXXXXXX
+  email            String?   @unique
+  name             String
+  role             UserRole  @default(DINER)
+  // Dietary preferences (for smart suggestions)
+  dietaryPrefs     DietaryTag[]
+  favoriteCuisines CuisineTag[]
+  // No-show tracking
+  noShowCount      Int       @default(0)
+  noShowWindowStart DateTime? // Start of rolling 60-day window
+  requiresDeposit  Boolean   @default(false)
+  // Loyalty points (10 pts per completed booking)
+  loyaltyPoints    Int       @default(0)
+  // Timestamps
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  lastActiveAt     DateTime  @default(now())
+  // GDPR/GH Data Protection Act 2012 compliance
+  consentGiven     Boolean   @default(false)
+  consentAt        DateTime?
+  deletedAt        DateTime? // Soft delete for data export requests
+
+  // Relations
+  reservations     Reservation[]
+  waitlistEntries  WaitlistEntry[]
+  walkInEntries    WalkInEntry[]
+  reviews          Review[]
+  favorites        Favorite[]
+  notifications    Notification[]
+  payments         Payment[]
+  pointsTransactions PointsTransaction[]
+  staffRoles       RestaurantStaff[]
+  noShowRecords    NoShowRecord[]
+
+  @@index([phone])
+  @@index([clerkId])
+  @@index([email])
+  @@map("users")
+}
+
+model Restaurant {
+  id               String          @id @default(cuid())
+  slug             String          @unique // URL-friendly: "santoku-osu"
+  name             String
+  description      String
+  shortBio         String          @db.VarChar(160) // For cards
+  // Location
+  neighborhood     Neighborhood
+  address          String
+  city             String          @default("Accra")
+  country          String          @default("GH")
+  latitude         Decimal         @db.Decimal(10, 7)
+  longitude        Decimal         @db.Decimal(10, 7)
+  googleMapsUrl    String?
+  appleMapsUrl     String?
+  // Classification
+  cuisineTags      CuisineTag[]
+  venueCategories  VenueCategory[]
+  dishSpecialties  DishSpecialty[]
+  priceLevel       PriceLevel
+  // Contact
+  phone            String          // +233XXXXXXXXX
+  whatsappPhone    String?         // May differ from main phone
+  email            String?
+  websiteUrl       String?
+  instagramHandle  String?
+  // Operational
+  isActive         Boolean         @default(true)
+  isVerified       Boolean         @default(false)
+  // Turn time in minutes (default 90)
+  defaultTurnTime  Int             @default(90)
+  // Ratings (denormalized for query performance)
+  ratingAvg        Decimal         @default(0) @db.Decimal(3, 2)
+  ratingCount      Int             @default(0)
+  // Features (bitmask-like via array — easy to filter)
+  features         RestaurantFeature[]
+  // Deposit settings
+  depositEnabled   Boolean         @default(false)
+  depositAmountPesewas Int?        // Per-guest deposit in pesewas
+  depositRequiredDays  DayOfWeek[] // e.g., [FRIDAY, SATURDAY]
+  depositRefundHours   Int         @default(4) // hours before booking
+  // SEO
+  metaTitle        String?
+  metaDescription  String?
+  // Timestamps
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+
+  // Relations
+  staff            RestaurantStaff[]
+  tables           RestaurantTable[]
+  menuCategories   MenuCategory[]
+  menuItems        MenuItem[]
+  photos           Photo[]
+  operatingHours   OperatingHours[]
+  blackoutDates    BlackoutDate[]
+  reservations     Reservation[]
+  waitlistEntries  WaitlistEntry[]
+  walkInEntries    WalkInEntry[]
+  reviews          Review[]
+  favorites        Favorite[]
+  notifications    Notification[]
+  specialEvents    SpecialEvent[]
+
+  @@index([neighborhood])
+  @@index([priceLevel])
+  @@index([isActive, isVerified])
+  @@index([ratingAvg(sort: Desc)])
+  @@index([latitude, longitude]) // For Haversine distance queries
+  // Full-text search index (created via migration SQL)
+  @@map("restaurants")
+}
+
+enum RestaurantFeature {
+  OUTDOOR_SEATING
+  PARKING
+  LIVE_MUSIC
+  KID_FRIENDLY
+  HALAL_CERTIFIED
+  WHEELCHAIR_ACCESSIBLE
+  ACCEPTS_MOMO
+  ACCEPTS_CARD
+  DELIVERY
+  TAKEAWAY
+  ROOFTOP
+  POOL_VIEW
+  SEA_VIEW
+  PRIVATE_DINING
+  SPORTS_TV
+  SHISHA
+  WIFI
+}
+
+model RestaurantStaff {
+  id           String    @id @default(cuid())
+  userId       String
+  restaurantId String
+  role         UserRole  // RESTAURANT_STAFF or RESTAURANT_OWNER
+  createdAt    DateTime  @default(now())
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, restaurantId])
+  @@map("restaurant_staff")
+}
+
+// Physical tables at the restaurant
+model RestaurantTable {
+  id           String        @id @default(cuid())
+  restaurantId String
+  label        String        // e.g., "T1", "Patio-3", "VIP-A"
+  capacity     TableCapacity
+  minGuests    Int           @default(1)
+  maxGuests    Int
+  isActive     Boolean       @default(true)
+  notes        String?       // e.g., "Near window", "Can be joined with T2"
+
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([restaurantId, isActive])
+  @@map("restaurant_tables")
+}
+
+model MenuCategory {
+  id           String     @id @default(cuid())
+  restaurantId String
+  name         String     // "Starters", "Mains", "Sides", "Desserts", "Drinks", "Cocktails"
+  description  String?
+  sortOrder    Int        @default(0)
+  isActive     Boolean    @default(true)
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items        MenuItem[]
+
+  @@index([restaurantId, sortOrder])
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id              String       @id @default(cuid())
+  restaurantId    String
+  categoryId      String
+  name            String
+  description     String?
+  // Price in pesewas (e.g., 8500 = ₵85.00)
+  pricePesewas    Int
+  photoUrl        String?
+  dietaryTags     DietaryTag[]
+  dishSpecialties DishSpecialty[]
+  isAvailable     Boolean      @default(true)
+  isSignatureDish Boolean      @default(false)
+  sortOrder       Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  restaurant      Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  category        MenuCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, isAvailable])
+  @@index([categoryId])
+  // Full-text search (created in migration)
+  @@map("menu_items")
+}
+
+model Photo {
+  id           String       @id @default(cuid())
+  restaurantId String
+  url          String       // R2 CDN URL
+  thumbnailUrl String?      // 400x300 WebP thumb
+  context      PhotoContext
+  altText      String?
+  sortOrder    Int          @default(0)
+  uploadedBy   String?      // userId — null if uploaded by staff via admin
+  createdAt    DateTime     @default(now())
+
+  restaurant   Restaurant   @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, context, sortOrder])
+  @@map("photos")
+}
+
+model OperatingHours {
+  id           String     @id @default(cuid())
+  restaurantId String
+  dayOfWeek    DayOfWeek
+  // Stored as minutes since midnight (e.g., 720 = 12:00, 1320 = 22:00)
+  openTime     Int
+  closeTime    Int
+  isClosed     Boolean    @default(false)
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, dayOfWeek])
+  @@map("operating_hours")
+}
+
+model BlackoutDate {
+  id           String     @id @default(cuid())
+  restaurantId String
+  date         DateTime   @db.Date
+  reason       String?    // "Private event", "Public holiday", etc.
+
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([restaurantId, date])
+  @@index([restaurantId, date])
+  @@map("blackout_dates")
+}
+
+model SpecialEvent {
+  id              String     @id @default(cuid())
+  restaurantId    String
+  title           String
+  description     String?
+  date            DateTime   @db.Date
+  startTime       Int        // minutes since midnight
+  endTime         Int
+  depositRequired Boolean    @default(false)
+  depositPesewas  Int?
+
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, date])
+  @@map("special_events")
+}
+
+model Reservation {
+  id           String            @id @default(cuid())
+  // Human-readable reference: TGH-XXXXXX (6 uppercase alphanumeric)
+  ref          String            @unique
+  restaurantId String
+  userId       String
+  tableId      String?           // Assigned table (may be null until confirmed)
+  // Booking details
+  partySize    Int
+  date         DateTime          @db.Date
+  // Slot time as minutes since midnight (e.g., 1200 = 20:00)
+  timeSlot     Int
+  // Africa/Accra DateTime of the booking start (for notifications, reminders)
+  startsAt     DateTime
+  endsAt       DateTime          // startsAt + turnTime
+  status       ReservationStatus @default(PENDING)
+  occasion     OccasionType?
+  specialReqs  String?           @db.VarChar(280)
+  // Guest info (may differ from user profile — booking for someone else)
+  guestName    String
+  guestPhone   String            // +233XXXXXXXXX
+  // Deposit
+  depositRequired Boolean        @default(false)
+  depositPesewas  Int?
+  depositPaid     Boolean        @default(false)
+  // Cancellation
+  cancelledAt  DateTime?
+  cancelReason String?
+  // Modification
+  modifiedAt   DateTime?
+  // No-show
+  noShowAt     DateTime?
+  // Admin notes
+  adminNotes   String?
+  // Reminder tracking
+  reminder24hSentAt DateTime?
+  reminder2hSentAt  DateTime?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  restaurant   Restaurant        @relation(fields: [restaurantId], references: [id])
+  user         User              @relation(fields: [userId], references: [id])
+  table        RestaurantTable?  @relation(fields: [tableId], references: [id])
+  payment      Payment?
+  review       Review?
+  notifications Notification[]
+  noShowRecord NoShowRecord?
+
+  @@unique([tableId, date, timeSlot]) // Prevent double-booking at DB level
+  @@index([restaurantId, date, status])
+  @@index([userId, status])
+  @@index([ref])
+  @@index([startsAt])
+  @@map("reservations")
+}
+
+model WaitlistEntry {
+  id           String        @id @default(cuid())
+  restaurantId String
+  userId       String
+  partySize    Int
+  date         DateTime      @db.Date
+  // Desired slot ±30 min window
+  desiredTime  Int           // minutes since midnight
+  windowStart  Int           // desiredTime - 30
+  windowEnd    Int           // desiredTime + 30
+  status       WaitlistStatus @default(WAITING)
+  // When notified, timestamp and expiry
+  notifiedAt   DateTime?
+  claimExpiry  DateTime?     // notifiedAt + 15 min
+  claimedAt    DateTime?
+  reservationId String?      @unique // Created when claimed
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  restaurant   Restaurant    @relation(fields: [restaurantId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+
+  @@index([restaurantId, date, status, createdAt])
+  @@index([userId, status])
+  @@map("waitlist_entries")
+}
+
+// Walk-in queue (QR code scan at venue)
+model WalkInEntry {
+  id           String       @id @default(cuid())
+  restaurantId String
+  userId       String?      // null if anonymous (just phone)
+  guestName    String
+  guestPhone   String       // +233XXXXXXXXX
+  partySize    Int
+  queuePosition Int
+  estimatedWaitMinutes Int  @default(0)
+  status       WalkInStatus @default(QUEUED)
+  notifiedAt   DateTime?
+  seatedAt     DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  restaurant   Restaurant   @relation(fields: [restaurantId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  @@index([restaurantId, status, createdAt])
+  @@map("walk_in_entries")
+}
+
+model Review {
+  id              String    @id @default(cuid())
+  restaurantId    String
+  userId          String
+  reservationId   String    @unique // One review per booking
+  rating          Int       // 1–5
+  body            String?   @db.VarChar(1000)
+  photoUrls       String[]  // R2 CDN URLs
+  isFlagged       Boolean   @default(false)
+  flagReason      String?
+  // Verified diner badge — always true (enforced by FK to reservation)
+  isVerified      Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  restaurant      Restaurant      @relation(fields: [restaurantId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
+  reservation     Reservation     @relation(fields: [reservationId], references: [id])
+  response        ReviewResponse?
+
+  @@index([restaurantId, createdAt(sort: Desc)])
+  @@index([restaurantId, rating])
+  @@map("reviews")
+}
+
+model ReviewResponse {
+  id         String   @id @default(cuid())
+  reviewId   String   @unique
+  authorId   String   // Restaurant staff userId
+  body       String   @db.VarChar(500)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  review     Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("review_responses")
+}
+
+model Favorite {
+  id           String     @id @default(cuid())
+  userId       String
+  restaurantId String
+  createdAt    DateTime   @default(now())
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, restaurantId])
+  @@map("favorites")
+}
+
+model Payment {
+  id              String          @id @default(cuid())
+  reservationId   String          @unique
+  userId          String
+  // Amount in pesewas
+  amountPesewas   Int
+  provider        PaymentProvider
+  // Paystack reference / Hubtel reference
+  providerRef     String          @unique
+  status          PaymentStatus   @default(PENDING)
+  // MoMo details (if applicable)
+  momoNetwork     MoMoNetwork?
+  momoPhone       String?
+  // Refund tracking
+  refundedPesewas Int             @default(0)
+  refundedAt      DateTime?
+  // Raw provider webhook payload (for audit)
+  providerPayload Json?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  reservation     Reservation     @relation(fields: [reservationId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@index([providerRef])
+  @@map("payments")
+}
+
+model Notification {
+  id           String              @id @default(cuid())
+  userId       String
+  restaurantId String?
+  reservationId String?
+  type         NotificationType
+  channel      NotificationChannel
+  status       NotificationStatus  @default(QUEUED)
+  // Recipient contact
+  toPhone      String?
+  toEmail      String?
+  // Provider response
+  providerRef  String?
+  errorMessage String?
+  // Template data (for WhatsApp templates)
+  templateData Json?
+  sentAt       DateTime?
+  deliveredAt  DateTime?
+  createdAt    DateTime            @default(now())
+
+  user         User                @relation(fields: [userId], references: [id])
+  restaurant   Restaurant?         @relation(fields: [restaurantId], references: [id])
+  reservation  Reservation?        @relation(fields: [reservationId], references: [id])
+
+  @@index([userId, type])
+  @@index([reservationId])
+  @@index([status, createdAt])
+  @@map("notifications")
+}
+
+model NoShowRecord {
+  id           String    @id @default(cuid())
+  userId       String
+  reservationId String   @unique
+  recordedAt   DateTime  @default(now())
+  // Auto-calculated: if noShowCount >= 2 in 60 days, requiresDeposit = true
+  rollingWindowStart DateTime
+
+  user         User        @relation(fields: [userId], references: [id])
+  reservation  Reservation @relation(fields: [reservationId], references: [id])
+
+  @@index([userId, recordedAt])
+  @@map("no_show_records")
+}
+
+model PointsTransaction {
+  id           String    @id @default(cuid())
+  userId       String
+  points       Int       // Positive = earned, negative = redeemed
+  description  String
+  // Link to the booking that triggered this
+  reservationId String?
+  createdAt    DateTime  @default(now())
+
+  user         User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("points_transactions")
+}

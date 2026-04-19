@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   TableGH Design Tokens
+   Afro-fusion modern — warm, premium, confident.
+   ========================================================================== */
+
+@layer base {
+  :root {
+    /* Brand palette */
+    --color-primary: #0F7B5A;      /* Deep forest green */
+    --color-primary-light: #16a37a;
+    --color-primary-dark: #09573f;
+    --color-accent: #D4A853;        /* Champagne gold */
+    --color-accent-light: #e8c278;
+    --color-accent-dark: #b8893e;
+
+    /* Neutrals */
+    --color-charcoal: #1A1A1A;
+    --color-cream: #FAF7F2;
+    --color-stone: #8B8680;
+    --color-stone-light: #C4BFB9;
+    --color-stone-dark: #5E5A57;
+    --color-white: #FFFFFF;
+    --color-off-white: #F5F2ED;
+
+    /* Semantic */
+    --color-success: #10B981;
+    --color-warning: #F59E0B;
+    --color-error: #EF4444;
+    --color-info: #3B82F6;
+
+    /* Typography */
+    --font-display: "Fraunces", Georgia, serif;
+    --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
+
+    /* Spacing scale */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.625rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.5rem;
+    --radius-full: 9999px;
+
+    /* Shadows */
+    --shadow-card: 0 1px 3px rgba(26, 26, 26, 0.08), 0 4px 16px rgba(26, 26, 26, 0.06);
+    --shadow-elevated: 0 4px 12px rgba(26, 26, 26, 0.12), 0 16px 40px rgba(26, 26, 26, 0.08);
+    --shadow-modal: 0 24px 64px rgba(26, 26, 26, 0.2);
+  }
+
+  html {
+    color-scheme: light;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-charcoal);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Heading font — all display text uses Fraunces */
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+  }
+
+  /* Focus styles — accessible */
+  :focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+}
+
+/* ==========================================================================
+   Utility classes
+   ========================================================================== */
+
+@layer utilities {
+  /* Grain texture overlay for hero sections */
+  .texture-grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Price level display */
+  .price-level-active {
+    color: var(--color-charcoal);
+  }
+  .price-level-inactive {
+    color: var(--color-stone-light);
+  }
+
+  /* Gold shimmer for accent elements */
+  .shimmer-gold {
+    background: linear-gradient(
+      90deg,
+      var(--color-accent-dark) 0%,
+      var(--color-accent-light) 50%,
+      var(--color-accent-dark) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  /* Card hover lift */
+  .card-hover {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-elevated);
+  }
+}
