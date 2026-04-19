@@ -32,6 +32,7 @@ import {
   ACCRA_TZ,
 } from "@/lib/utils/slots";
 import { sendBookingConfirmation } from "@/lib/notifications/whatsapp";
+import { sendSms } from "@/lib/notifications/sms";
 import { formatBookingDateTime } from "@/lib/utils/slots";
 import { formatGHS } from "@/lib/utils/currency";
 import {
@@ -61,6 +62,39 @@ const DAY_MAP: Record<number, DayOfWeek> = {
   5: DayOfWeek.FRIDAY,
   6: DayOfWeek.SATURDAY,
 };
+
+async function sendConfirmationWithFallback(params: {
+  to: string;
+  guestName: string;
+  restaurantName: string;
+  bookingRef: string;
+  dateTime: string;
+  partySize: number;
+  address: string;
+  mapsUrl: string;
+  cancelUrl: string;
+}): Promise<{ channel: "WHATSAPP" | "SMS" | "FAILED"; error?: string }> {
+  try {
+    await sendBookingConfirmation(params);
+    return { channel: "WHATSAPP" };
+  } catch (waErr) {
+    console.warn(
+      `[reservations] WhatsApp confirmation failed for ${params.bookingRef}, falling back to SMS:`,
+      waErr
+    );
+    try {
+      const message = `TableGH: Booking confirmed at ${params.restaurantName} on ${params.dateTime}. Ref: ${params.bookingRef}`;
+      await sendSms(params.to, message);
+      return { channel: "SMS" };
+    } catch (smsErr) {
+      console.error(
+        `[reservations] SMS confirmation also failed for ${params.bookingRef}:`,
+        smsErr
+      );
+      return { channel: "FAILED", error: String(smsErr) };
+    }
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST — Create reservation
@@ -251,38 +285,39 @@ export async function POST(req: NextRequest) {
         reservation.timeSlot
       );
 
-      sendBookingConfirmation({
-        to: reservation.guestPhone,
-        guestName: reservation.guestName,
-        restaurantName: restaurant.name,
-        bookingRef: reservation.ref,
-        dateTime: dateTimeStr,
-        partySize: reservation.partySize,
-        address: restaurant.address,
-        mapsUrl: restaurant.googleMapsUrl ?? "",
-        cancelUrl,
-      }).catch((err) => {
-        console.error("WhatsApp confirmation failed:", err);
-      });
+      void (async () => {
+        const result = await sendConfirmationWithFallback({
+          to: reservation.guestPhone,
+          guestName: reservation.guestName,
+          restaurantName: restaurant.name,
+          bookingRef: reservation.ref,
+          dateTime: dateTimeStr,
+          partySize: reservation.partySize,
+          address: restaurant.address,
+          mapsUrl: restaurant.googleMapsUrl ?? "",
+          cancelUrl,
+        });
 
-      // Record notification in DB
-      db.notification
-        .create({
-          data: {
-            userId: user.id,
-            restaurantId: restaurant.id,
-            reservationId: reservation.id,
-            type: "BOOKING_CONFIRMATION",
-            channel: "WHATSAPP",
-            status: "QUEUED",
-            toPhone: reservation.guestPhone,
-            templateData: {
-              bookingRef: reservation.ref,
-              restaurantName: restaurant.name,
+        // Record notification in DB
+        await db.notification
+          .create({
+            data: {
+              userId: user.id,
+              restaurantId: restaurant.id,
+              reservationId: reservation.id,
+              type: "BOOKING_CONFIRMATION",
+              channel: result.channel === "SMS" ? "SMS" : "WHATSAPP",
+              status: result.channel === "FAILED" ? "FAILED" : "SENT",
+              toPhone: reservation.guestPhone,
+              templateData: {
+                bookingRef: reservation.ref,
+                restaurantName: restaurant.name,
+                fallbackError: result.error ?? null,
+              },
             },
-          },
-        })
-        .catch(console.error);
+          })
+          .catch(console.error);
+      })();
     }
 
     return created({
