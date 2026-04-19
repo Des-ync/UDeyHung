@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import * as Sentry from "@sentry/nextjs";
 import { db } from "@/lib/db";
 import {
   verifyWebhookSignature,
@@ -54,7 +55,16 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error("Paystack webhook processing error:", err);
-    // Return 200 to prevent Paystack retrying — log for manual review
+    Sentry.captureException(err, {
+      tags: {
+        webhook: "paystack",
+        event: event.event,
+      },
+      extra: {
+        reference: event.data?.reference,
+      },
+    });
+    // Return 200 to prevent Paystack retrying — captured for manual review
   }
 
   return new NextResponse("OK", { status: 200 });

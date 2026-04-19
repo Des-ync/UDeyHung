@@ -89,6 +89,90 @@ async function sendReminder(
   }
 }
 
+async function processReminderBatch(
+  reservations: Array<{
+    id: string;
+    userId: string;
+    restaurantId: string;
+    guestPhone: string;
+    guestName: string;
+    ref: string;
+    startsAt: Date;
+    timeSlot: number;
+    restaurant: { name: string; address: string; googleMapsUrl: string | null };
+  }>,
+  isLast2Hours: boolean
+): Promise<ReminderResult[]> {
+  const settled = await Promise.allSettled(
+    reservations.map((res) =>
+      sendReminder(
+        res.id,
+        res.guestPhone,
+        res.guestName,
+        res.restaurant.name,
+        res.restaurant.address,
+        res.restaurant.googleMapsUrl ?? "",
+        res.ref,
+        res.startsAt,
+        res.timeSlot,
+        isLast2Hours
+      ).then(async (result) => {
+        await db.reservation
+          .update({
+            where: { id: res.id },
+            data: isLast2Hours
+              ? { reminder2hSentAt: new Date() }
+              : { reminder24hSentAt: new Date() },
+          })
+          .catch(console.error);
+
+        await db.notification
+          .create({
+            data: {
+              userId: res.userId,
+              restaurantId: res.restaurantId,
+              reservationId: res.id,
+              type: isLast2Hours ? "BOOKING_REMINDER_2H" : "BOOKING_REMINDER_24H",
+              channel: result.channel === "sms" ? "SMS" : "WHATSAPP",
+              status: result.channel === "failed" ? "FAILED" : "SENT",
+              toPhone: res.guestPhone,
+              templateData: { bookingRef: res.ref },
+            },
+          })
+          .catch(console.error);
+
+        return result;
+      })
+    )
+  );
+
+  return settled.map((entry, index) => {
+    if (entry.status === "fulfilled") return entry.value;
+    const failed = reservations[index];
+    console.error(`[reminders] send promise failed for ${failed.ref}:`, entry.reason);
+    return {
+      reservationId: failed.id,
+      ref: failed.ref,
+      channel: "failed",
+      error: String(entry.reason),
+    };
+  });
+}
+
+async function processInChunks<T>(
+  items: T[],
+  size: number,
+  worker: (chunk: T[]) => Promise<ReminderResult[]>
+): Promise<ReminderResult[]> {
+  const aggregated: ReminderResult[] = [];
+  for (let index = 0; index < items.length; index += size) {
+    const chunk = items.slice(index, index + size);
+    const chunkResults = await worker(chunk);
+    aggregated.push(...chunkResults);
+  }
+  return aggregated;
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
@@ -122,45 +206,10 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    for (const res of due24h) {
-      const result = await sendReminder(
-        res.id,
-        res.guestPhone,
-        res.guestName,
-        res.restaurant.name,
-        res.restaurant.address,
-        res.restaurant.googleMapsUrl ?? "",
-        res.ref,
-        res.startsAt,
-        res.timeSlot,
-        false
-      );
-      results.push(result);
-
-      // Mark sent regardless of channel (avoid duplicate sends)
-      await db.reservation
-        .update({
-          where: { id: res.id },
-          data: { reminder24hSentAt: new Date() },
-        })
-        .catch(console.error);
-
-      // Record notification
-      await db.notification
-        .create({
-          data: {
-            userId: res.userId,
-            restaurantId: res.restaurantId,
-            reservationId: res.id,
-            type: "BOOKING_REMINDER_24H",
-            channel: result.channel === "sms" ? "SMS" : "WHATSAPP",
-            status: result.channel === "failed" ? "FAILED" : "SENT",
-            toPhone: res.guestPhone,
-            templateData: { bookingRef: res.ref },
-          },
-        })
-        .catch(console.error);
-    }
+    const results24h = await processInChunks(due24h, 10, (chunk) =>
+      processReminderBatch(chunk, false)
+    );
+    results.push(...results24h);
 
     // ── 2h reminders ───────────────────────────────────────────────────────
     // Window: bookings starting between now+1h50m and now+2h10m
@@ -184,43 +233,10 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    for (const res of due2h) {
-      const result = await sendReminder(
-        res.id,
-        res.guestPhone,
-        res.guestName,
-        res.restaurant.name,
-        res.restaurant.address,
-        res.restaurant.googleMapsUrl ?? "",
-        res.ref,
-        res.startsAt,
-        res.timeSlot,
-        true
-      );
-      results.push(result);
-
-      await db.reservation
-        .update({
-          where: { id: res.id },
-          data: { reminder2hSentAt: new Date() },
-        })
-        .catch(console.error);
-
-      await db.notification
-        .create({
-          data: {
-            userId: res.userId,
-            restaurantId: res.restaurantId,
-            reservationId: res.id,
-            type: "BOOKING_REMINDER_2H",
-            channel: result.channel === "sms" ? "SMS" : "WHATSAPP",
-            status: result.channel === "failed" ? "FAILED" : "SENT",
-            toPhone: res.guestPhone,
-            templateData: { bookingRef: res.ref },
-          },
-        })
-        .catch(console.error);
-    }
+    const results2h = await processInChunks(due2h, 10, (chunk) =>
+      processReminderBatch(chunk, true)
+    );
+    results.push(...results2h);
 
     console.log(
       `[reminders] Sent ${due24h.length} 24h + ${due2h.length} 2h reminders.`

@@ -6,10 +6,12 @@ const isPublicRoute = createRouteMatcher([
   "/search(.*)",
   "/restaurants/(.*)",
   "/booking/(.*)",
+  "/walkin(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
   // API routes that are public
   "/api/v1/restaurants(.*)",
+  "/api/v1/walkin(.*)",
   // Webhook endpoints (skip auth — they use signature verification instead)
   "/api/v1/webhooks(.*)",
 ]);
